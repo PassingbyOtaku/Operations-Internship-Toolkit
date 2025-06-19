@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文本差异比对工具</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; line-height: 1.6; margin: 20px; }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .file-info { margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 5px; }
+        .diff-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .diff-table th, .diff-table td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
+        .diff-table th { background-color: #f2f2f2; }
+        .diff-added { background-color: #d4edda; color: #155724; }
+        .diff-removed { background-color: #f8d7da; color: #721c24; text-decoration: line-through; }
+        .diff-unchanged { background-color: #f8f9fa; }
+        .controls { margin-bottom: 20px; }
+        button { background-color: #3498db; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-right: 10px; }
+        button:hover { background-color: #2980b9; }
+        .file-input { margin: 10px 0; }
+        #result-container { display: none; margin-top: 20px; }
+        .loading { display: none; color: #666; font-style: italic; }
+        .error { color: #721c24; background-color: #f8d7da; padding: 10px; border-radius: 4px; margin: 10px 0; display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>文本差异比对工具</h1>
+        <div class="controls">
+            <div class="file-input">
+                <label for="file1">原始文件:</label>
+                <input type="file" id="file1" accept=".txt,.md,.html,.py,.java,.cpp,.js,.css">
+            </div>
+            <div class="file-input">
+                <label for="file2">修改后文件:</label>
+                <input type="file" id="file2" accept=".txt,.md,.html,.py,.java,.cpp,.js,.css">
+            </div>
+            <button onclick="compareFiles()">比对文件</button>
+            <button onclick="downloadReport()">下载报告</button>
+        </div>
+        <div class="error" id="error-message"></div>
+        <div class="loading" id="loading">正在比对文件，请稍候...</div>
+        <div id="result-container">
+            <div class="file-info">
+                <p>比对时间: <span id="timestamp"></span></p>
+                <p>原始文件: <span id="file1-name">未选择</span></p>
+                <p>修改后文件: <span id="file2-name">未选择</span></p>
+            </div>
+            <div id="diff-content"></div>
+        </div>
+    </div>
+
+    <script>
+        async function compareFiles() {
+            const file1 = document.getElementById('file1').files[0];
+            const file2 = document.getElementById('file2').files[0];
+            const loading = document.getElementById('loading');
+            const resultContainer = document.getElementById('result-container');
+            const errorMessage = document.getElementById('error-message');
+            const file1Name = document.getElementById('file1-name');
+            const file2Name = document.getElementById('file2-name');
+            const timestamp = document.getElementById('timestamp');
+            const diffContent = document.getElementById('diff-content');
+
+            // 重置状态
+            errorMessage.style.display = 'none';
+            errorMessage.textContent = '';
+
+            if (!file1 || !file2) {
+                showError('请选择两个文件进行比对');
+                return;
+            }
+
+            file1Name.textContent = file1.name;
+            file2Name.textContent = file2.name;
+            loading.style.display = 'block';
+            resultContainer.style.display = 'none';
+
+            try {
+                // 读取文件内容
+                const text1 = await readFileContent(file1);
+                const text2 = await readFileContent(file2);
+
+                // 发送比对请求到本地服务器
+                const response = await fetch('http://localhost:8000/compare', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text1: text1,
+                        text2: text2,
+                        file1Name: file1.name,
+                        file2Name: file2.name
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('比对过程出错: ' + response.statusText);
+                }
+
+                const result = await response.json();
+                timestamp.textContent = result.timestamp;
+                diffContent.innerHTML = result.diffTable;
+                loading.style.display = 'none';
+                resultContainer.style.display = 'block';
+
+                // 保存结果到本地存储供下载使用
+                localStorage.setItem('diffResult', JSON.stringify(result));
+            } catch (error) {
+                showError(error.message);
+                loading.style.display = 'none';
+            }
+        }
+
+        function readFileContent(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = (e) => reject(new Error('文件读取失败: ' + e.target.error.message));
+                reader.readAsText(file, 'utf-8');
+            });
+        }
+
+        function showError(message) {
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+
+        function downloadReport() {
+            try {
+                const result = JSON.parse(localStorage.getItem('diffResult'));
+                if (!result) {
+                    showError('没有可下载的比对结果');
+                    return;
+                }
+
+                // 生成完整的HTML报告
+                const htmlContent = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>文本差异比对报告 - ${result.timestamp}</title>
+    <style>
+        /* 嵌入完整CSS样式 */
+        body { font-family: 'Microsoft YaHei', sans-serif; line-height: 1.6; margin: 20px; }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .file-info { margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 5px; }
+        .diff-table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        .diff-table th, .diff-table td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; }
+        .diff-table th { background-color: #f2f2f2; }
+        .diff-added { background-color: #d4edda; color: #155724; }
+        .diff-removed { background-color: #f8d7da; color: #721c24; text-decoration: line-through; }
+        .diff-unchanged { background-color: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>文本差异比对报告</h1>
+        <div class="file-info">
+            <p>比对时间: ${result.timestamp}</p>
+            <p>原始文件: ${result.file1Name}</p>
+            <p>修改后文件: ${result.file2Name}</p>
+        </div>
+        ${result.diffTable}
+    </div>
+</body>
+</html>`;
+
+                // 创建下载链接
+                const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `diff_report_${result.timestamp.replace(/[:\s]/g, '_')}.html`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showError('下载报告失败: ' + error.message);
+            }
+        }
+
+        // 检查本地服务器是否可用
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('http://localhost:8000/status');
+                return response.ok;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        // 页面加载时检查服务器状态
+        window.onload = async function() {
+            const serverAvailable = await checkServerStatus();
+            if (!serverAvailable) {
+                showError('本地服务器未运行，请先运行Python脚本启动服务');
+            }
+        };
+    </script>
+</body>
+</html>
